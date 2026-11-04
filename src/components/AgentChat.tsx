@@ -28,6 +28,7 @@ import { hasUsableModel } from '../lib/agentSettings'
 import { loadUserPrefsEnvelope } from '../lib/userPrefs'
 import type { AgentAiPrefs } from '../lib/userPrefs'
 import { getSupabase, isSupabaseConfigured } from '../lib/supabaseClient'
+import { AgentText } from './AgentText'
 import { AgentDiffCard } from './AgentDiffCard'
 import { randomId } from '../lib/randomId'
 import { createStickyScroll } from '../lib/stickyScroll'
@@ -285,9 +286,15 @@ export function AgentChat() {
               )}
               {chat.messages.map((message) => (
                 <div key={message.id} className={message.role === 'user' ? 'text-right' : ''}>
-                  <p className="inline-block max-w-full whitespace-pre-wrap rounded-2xl bg-surface px-3 py-2 text-left text-sm text-text">
-                    {message.text}
-                  </p>
+                  {message.role === 'user' ? (
+                    <p className="inline-block max-w-full whitespace-pre-wrap rounded-2xl bg-surface px-3 py-2 text-left text-sm text-text">
+                      {message.text}
+                    </p>
+                  ) : (
+                    <div className="inline-block max-w-full rounded-2xl bg-surface px-3 py-2 text-left text-sm text-text">
+                      <AgentText text={message.text} />
+                    </div>
+                  )}
                   {message.outcome === 'proposed' && (
                     <AgentDiffCard
                       message={message}
