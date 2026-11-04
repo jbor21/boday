@@ -29,6 +29,11 @@ export function formatDateLong(dateStr: string): string {
   return format(fromDateStr(dateStr), 'EEEE, MMMM d')
 }
 
+/** "Wed, Jun 17" */
+export function formatDateDay(dateStr: string): string {
+  return format(fromDateStr(dateStr), 'EEE, MMM d')
+}
+
 /** "Jun 17" */
 export function formatDateShort(dateStr: string): string {
   return format(fromDateStr(dateStr), 'MMM d')

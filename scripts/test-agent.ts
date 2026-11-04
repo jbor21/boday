@@ -21,6 +21,7 @@ import {
   canSend,
   chatKey,
   diffModel,
+  parseRichText,
   loadChat,
   normalizeToast,
   panelMessage,
@@ -48,6 +49,7 @@ import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { AgentSettings } from '../src/components/AgentSettings.tsx'
 import { AgentDiffCard } from '../src/components/AgentDiffCard.tsx'
+import { AgentText } from '../src/components/AgentText.tsx'
 
 let failures = 0
 function check(name: string, cond: boolean, detail = '') {
@@ -605,7 +607,7 @@ const card = diffModel(
   ['dentist'],
   [dentist],
 )
-check('update line', card.updates[0].lines[0] === 'scheduledDate: 2026-10-22 → 2026-10-21')
+check('update line', card.updates[0].lines[0] === 'Date: Thu, Oct 22 → Wed, Oct 21')
 check('unchecked delete', card.deletes[0].checked === false && card.deletes[0].warnings[0] === 'Shared by someone else.')
 check('delete title from raw', card.deletes[0].title === 'Gym' && card.deletes[0].lines[0] === 'user asked')
 const statusCard = diffModel(
@@ -613,7 +615,7 @@ const statusCard = diffModel(
   ['gym'],
   [],
 )
-check('status is an update', statusCard.updates[0].lines[0] === 'status: open → skipped' && statusCard.updates[0].lines[1] === 'date: 2026-10-23' && statusCard.updates[0].title === 'gym')
+check('status is an update', statusCard.updates[0].lines[0] === 'Status: open → skipped' && statusCard.updates[0].lines[1] === 'Date: Fri, Oct 23' && statusCard.updates[0].title === 'gym')
 const reminderChange = {
   op: 'update',
   taskId: 'dentist',
@@ -633,13 +635,50 @@ const added = diffModel(
   '12h',
 )
 check('reminder added shows none', added.updates[0].lines[0] === 'Reminder: none → 5:00 PM')
+const labels = diffModel(
+  [{
+    op: 'update', taskId: 'dentist', warnings: [],
+    patch: { title: 'Dentist (Dr. Patel)', priority: 1, notes: 'Bring forms', tags: ['health'], recurrence: { kind: 'weekly', daysOfWeek: [1, 2, 3, 4, 5] }, endDate: null, color: 'red' },
+    beforeFields: { title: 'Dentist', priority: 5, notes: null, tags: [], recurrence: { kind: 'daily' }, endDate: '2026-12-31', color: 'blue' },
+  }],
+  ['dentist'],
+  [dentist],
+).updates[0].lines
+check('title label', labels[0] === 'Title: Dentist → Dentist (Dr. Patel)')
+check('priority label', labels[1] === 'Priority: Torah → P1')
+check('notes label', labels[2] === 'Notes: none → Bring forms')
+check('tags label', labels[3] === 'Tags: none → health')
+check('recurrence label', labels[4] === 'Repeats: Every day → Weekdays')
+check('end date label', labels[5] === 'Ends: Thu, Dec 31 → none')
+check('unknown field kept as is', labels[6] === 'color: blue → red')
+const createdLines = diffModel(
+  [{ op: 'create', taskId: 'new1', warnings: [], after: { id: 'new1', type: 'recurring', title: 'Stretch', priority: 3, recurrence: { kind: 'everyNDays', n: 2 }, startDate: '2026-11-04', reminderTime: '07:30', completed: false } }],
+  [],
+  [],
+  '12h',
+).creates[0].lines
+check('create lines', JSON.stringify(createdLines) === JSON.stringify(['Type: Recurring', 'Title: Stretch', 'Priority: P3', 'Repeats: Every 2 days', 'Starts: Wed, Nov 4', 'Reminder: 7:30 AM']))
+check('rich text paragraphs and bold', JSON.stringify(parseRichText('Your week is **fine**.\n\nNext line')) === JSON.stringify([
+  { kind: 'p', spans: [{ text: 'Your week is ', bold: false }, { text: 'fine', bold: true }, { text: '.', bold: false }] },
+  { kind: 'p', spans: [{ text: 'Next line', bold: false }] },
+]))
+check('rich text bullets', JSON.stringify(parseRichText('Plan:\n- **Tonight:** report\n* Call mom')) === JSON.stringify([
+  { kind: 'p', spans: [{ text: 'Plan:', bold: false }] },
+  { kind: 'ul', items: [[{ text: 'Tonight:', bold: true }, { text: ' report', bold: false }], [{ text: 'Call mom', bold: false }]] },
+]))
+check('rich text numbered list', JSON.stringify(parseRichText('1. First\n2. Second')) === JSON.stringify([
+  { kind: 'ol', items: [[{ text: 'First', bold: false }], [{ text: 'Second', bold: false }]] },
+]))
+const richHtml = renderToStaticMarkup(createElement(AgentText, { text: 'Plan:\n- **Tonight:** <b>report</b>' }))
+check('agent text renders bold and lists as text', richHtml.includes('<strong class="font-semibold">Tonight:</strong>') && richHtml.includes('<li>') && richHtml.includes('&lt;b&gt;report&lt;/b&gt;'))
+check('unclosed bold stays literal', JSON.stringify(parseRichText('a **b')) === JSON.stringify([{ kind: 'p', spans: [{ text: 'a **b', bold: false }] }]))
 const createdCard = diffModel(
   [{ op: 'create', taskId: 'new-1', after: { title: 'Call bank', reminderTime: '10:00' }, warnings: [] }],
   ['new-1'],
   [],
   '12h',
 )
-check('create reminder 12h', createdCard.creates[0].lines.includes('Reminder: 10:00 AM') && createdCard.creates[0].lines.includes('title: Call bank'))
+check('create reminder 12h', createdCard.creates[0].lines.includes('Reminder: 10:00 AM') && createdCard.creates[0].lines.includes('Title: Call bank'))
 
 const layout = readFileSync('src/components/Layout.tsx', 'utf8')
 check('entry uses the helper', layout.includes('agentEntry') && layout.includes('openAgent') && layout.includes('BoDay Agent'))
@@ -930,7 +969,7 @@ const fullCard = renderToStaticMarkup(createElement(AgentDiffCard, {
   onToggle: () => {}, onApprove: () => {}, onReject: () => {}, onUndo: () => {},
 }))
 check('fix9: the card renders creates, updates and deletes in their sections',
-  /<section class="text-success">.*Creates.*Call mom/.test(fullCard) && /<section class="text-p3">.*Updates.*Dentist.*priority: 3 → 1/.test(fullCard) && /text-danger">Deletes<.*Gym.*user asked/.test(fullCard))
+  /<section class="text-success">.*Creates.*Call mom/.test(fullCard) && /<section class="text-p3">.*Updates.*Dentist.*Priority: P3 → P1/.test(fullCard) && /text-danger">Deletes<.*Gym.*user asked/.test(fullCard))
 check('fix9: a pending card offers Approve and Reject, unchecked deletes', fullCard.includes('>Approve<') && fullCard.includes('>Reject<') && !fullCard.includes('>Undo<') && checkboxes(fullCard).filter((b) => b.includes('checked=""')).length === 2)
 
 const pendingMsg = { id: 'p', role: 'assistant', text: 'x', outcome: 'proposed', changes: [liveUpdate], proposalStatus: 'pending', selectedTaskIds: ['dentist'] }

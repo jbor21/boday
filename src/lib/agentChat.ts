@@ -1,7 +1,7 @@
 import type { RunResponse } from './agentContract'
 import type { AgentAiPrefs, UserPrefsEnvelope } from './userPrefs'
-import type { TimeFormat } from '../types'
-import { formatTime, formatTimesInText } from './format'
+import type { Recurrence, RecurringTask, TimeFormat } from '../types'
+import { describeRecurrence, formatDateDay, formatTime, formatTimesInText } from './format'
 
 export interface ChatMessage {
   id: string
@@ -313,11 +313,95 @@ function show(value: unknown): string {
   return String(value)
 }
 
-/** One diff line. A reminder time is shown in the user's format; other fields as stored. */
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
+
+const FIELD_LABELS: Record<string, string> = {
+  type: 'Type',
+  title: 'Title',
+  priority: 'Priority',
+  notes: 'Notes',
+  tags: 'Tags',
+  recurrence: 'Repeats',
+  scheduledDate: 'Date',
+  startDate: 'Starts',
+  endDate: 'Ends',
+  reminderTime: 'Reminder',
+  status: 'Status',
+  date: 'Date',
+}
+
+/** Internal fields a create carries that say nothing to the user. */
+const HIDDEN_CREATE_FIELDS = new Set(['id', 'completed'])
+
+function fieldValue(key: string, value: unknown, fmt: TimeFormat): string {
+  if (value === null || value === undefined || value === '') return 'none'
+  if (Array.isArray(value) && value.length === 0) return 'none'
+  if (key === 'reminderTime' && typeof value === 'string') return formatTime(value, fmt)
+  if ((key === 'scheduledDate' || key === 'startDate' || key === 'endDate' || key === 'date') && typeof value === 'string' && DATE_RE.test(value)) {
+    return formatDateDay(value)
+  }
+  if (key === 'priority' && typeof value === 'number') return value === 5 ? 'Torah' : `P${value}`
+  if (key === 'type') return value === 'recurring' ? 'Recurring' : value === 'one_time' ? 'One-time' : show(value)
+  if (key === 'recurrence' && plain(value)) return describeRecurrence({ recurrence: value as Recurrence } as RecurringTask)
+  if (key === 'tags' && Array.isArray(value)) return value.map(String).join(', ')
+  return show(value)
+}
+
+/** One diff line with a friendly label; values in the user's time format. Unknown fields as stored. */
 function fieldLine(key: string, values: unknown[], fmt: TimeFormat): string {
-  if (key !== 'reminderTime') return `${key}: ${values.map(show).join(' → ')}`
-  const times = values.map((value) => (typeof value === 'string' ? formatTime(value, fmt) : 'none'))
-  return `Reminder: ${times.join(' → ')}`
+  const label = FIELD_LABELS[key]
+  if (!label) return `${key}: ${values.map(show).join(' → ')}`
+  return `${label}: ${values.map((value) => fieldValue(key, value, fmt)).join(' → ')}`
+}
+
+export type RichSpan = { text: string; bold: boolean }
+export type RichBlock =
+  | { kind: 'p'; spans: RichSpan[] }
+  | { kind: 'ul' | 'ol'; items: RichSpan[][] }
+
+function spans(text: string): RichSpan[] {
+  const out: RichSpan[] = []
+  const re = /\*\*([^*]+)\*\*/g
+  let last = 0
+  for (const match of text.matchAll(re)) {
+    const at = match.index ?? 0
+    if (at > last) out.push({ text: text.slice(last, at), bold: false })
+    out.push({ text: match[1], bold: true })
+    last = at + match[0].length
+  }
+  if (last < text.length) out.push({ text: text.slice(last), bold: false })
+  return out
+}
+
+/**
+ * The small Markdown subset model replies use: paragraphs, `**bold**`,
+ * `- ` / `* ` bullets and `1. ` numbered lists. Rendered as React text, never HTML.
+ */
+export function parseRichText(text: string): RichBlock[] {
+  const blocks: RichBlock[] = []
+  let para: string[] = []
+  const flush = () => {
+    if (para.length) blocks.push({ kind: 'p', spans: spans(para.join('\n')) })
+    para = []
+  }
+  for (const line of text.split('\n')) {
+    const bullet = /^\s*[-*]\s+(.*)$/.exec(line)
+    const numbered = /^\s*\d+[.)]\s+(.*)$/.exec(line)
+    const item = bullet ?? numbered
+    if (item) {
+      flush()
+      const kind = bullet ? 'ul' : 'ol'
+      const prev = blocks[blocks.length - 1]
+      if (prev && prev.kind === kind) prev.items.push(spans(item[1]))
+      else blocks.push({ kind, items: [spans(item[1])] })
+    } else if (line.trim() === '') {
+      flush()
+    } else {
+      para.push(line)
+    }
+  }
+  flush()
+  return blocks
 }
 
 function changeTitle(change: Record<string, unknown>, tasks: readonly { id: string; title?: string }[]): string {
@@ -365,7 +449,7 @@ export function diffModel(
     if (rec.op === 'create') {
       const after = plain(rec.after) ?? {}
       row.lines = Object.keys(after)
-        .filter((key) => key !== 'id')
+        .filter((key) => !HIDDEN_CREATE_FIELDS.has(key))
         .map((key) => fieldLine(key, [after[key]], fmt))
       creates.push(row)
     } else if (rec.op === 'delete') {
@@ -374,8 +458,8 @@ export function diffModel(
     } else if (rec.op === 'set_status') {
       const before = plain(rec.before) ?? {}
       const after = plain(rec.after) ?? {}
-      row.lines = [`status: ${show(before.status)} → ${show(after.status)}`]
-      if (typeof rec.date === 'string') row.lines.push(`date: ${rec.date}`)
+      row.lines = [fieldLine('status', [before.status, after.status], fmt)]
+      if (typeof rec.date === 'string') row.lines.push(fieldLine('date', [rec.date], fmt))
       updates.push(row)
     } else if (rec.op === 'update') {
       const patch = plain(rec.patch) ?? {}
