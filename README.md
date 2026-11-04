@@ -6,6 +6,14 @@ agent comes with an **eval harness** that measures how reliable it is.
 
 **Live:** https://boday.boapps.workers.dev (invite-only).
 
+<p align="center">
+  <img src="docs/images/today.jpg" width="24%" alt="Today view: routines, streaks, priorities and carry-over counts">
+  <img src="docs/images/calendar.jpg" width="24%" alt="Month calendar with a dot per task">
+  <img src="docs/images/agent-proposal.jpg" width="24%" alt="The agent proposes moving the dentist appointment, shown as a change card with Approve and Reject">
+  <img src="docs/images/agent-advice.jpg" width="24%" alt="The agent answers 'Is my week realistic?' from the task list">
+</p>
+<p align="center"><sub>A demo account with invented tasks. The agent replies are real Claude Haiku runs.</sub></p>
+
 ## The agent in one paragraph
 
 You type "move my dentist to tomorrow" or "is my week realistic?". The agent
@@ -16,6 +24,11 @@ anything itself**: every change is applied by the app, only after you approve
 it. A 102-case eval suite measures success, damage, guessing, injection
 resistance, cost and latency across models, and every prompt change is a
 logged experiment with before/after numbers.
+
+<p align="center">
+  <img src="docs/images/agent-demo.gif" width="300" alt="Typing a request, the agent's change card appearing, and approving it, with Undo offered">
+</p>
+<p align="center"><sub>Ask, review the proposed change, approve. Undo stays available.</sub></p>
 
 ## Results
 
